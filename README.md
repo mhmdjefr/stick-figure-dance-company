@@ -19,3 +19,10 @@ TBD
 
 ## Credits
 - Book: *Processing 2: Creative Coding Hotshot* (Nikolaus Gradwohl)
+
+## Model setup
+The pose model is not stored in the repo. Download it once:
+
+    mkdir -p vision/models
+    curl -fL -o vision/models/pose_landmarker_lite.task \
+      https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task
