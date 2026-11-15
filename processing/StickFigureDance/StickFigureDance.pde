@@ -80,11 +80,13 @@ class Dancer {
     return new PVector(map(f[i], 0, 1, 0, width), map(f[N + i], 0, 1, 0, height));
   }
 
-  boolean ok(float[] f, int i) {
-    // Confident AND inside the frame (MediaPipe guesses off-screen joints)
-    return f[2 * N + i] >= 0.5
-        && f[i] > 0 && f[i] < 1
-        && f[N + i] > 0 && f[N + i] < 1;
+    boolean ok(float[] f, int i) {
+    if (f[2 * N + i] < 0.5) return false; // low confidence
+    // Lower body (23+) is guessed by MediaPipe when off-frame, so check bounds
+    if (i >= 23) {
+      return f[i] > 0 && f[i] < 1 && f[N + i] > 0 && f[N + i] < 1;
+    }
+    return true;
   }
 
   void bone(float[] f, int a, int b) {
