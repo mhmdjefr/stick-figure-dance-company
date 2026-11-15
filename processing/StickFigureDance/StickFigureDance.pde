@@ -1,4 +1,5 @@
 import oscP5.*;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 OscP5 osc;
@@ -17,27 +18,42 @@ void setup() {
 void draw() {
   background(255);
 
+  // Drop figures that stopped sending data (person left the frame)
+  ArrayList<Integer> ids = new ArrayList<Integer>();
   for (Integer id : figures.keySet()) {
     Figure f = figures.get(id);
-    // Drop figures that stopped sending data (person left the frame)
+    if (f == null) continue;
     if (millis() - f.lastSeen > 500) {
       figures.remove(id);
-      continue;
-    }
-    if (cloneMode) {
-      // Book-style company: clone the same dancer with varied color, size and position
-      for (int i = 0; i < cloneScale.length; i++) {
-        float cx = (i - (cloneScale.length - 1) / 2.0) * 300;
-        color c = lerpColor(f.c, palette[(f.id + i + 1) % palette.length], 0.6);
-        f.display(cx, cloneScale[i], c);
-      }
     } else {
-      f.display(0, 1, f.c);
+      ids.add(id);
+    }
+  }
+  Collections.sort(ids);
+
+  if (cloneMode) {
+    // Dance floor: clones sit in fixed slots spread across the screen
+    int total = ids.size() * cloneScale.length;
+    int k = 0;
+    for (Integer id : ids) {
+      Figure f = figures.get(id);
+      if (f == null) continue;
+      for (int i = 0; i < cloneScale.length; i++) {
+        float sx = width * (k + 1) / (total + 1.0);
+        color col = lerpColor(f.c, palette[(f.id + i + 1) % palette.length], 0.6);
+        f.displayClone(sx, height * 0.55, cloneScale[i], col);
+        k++;
+      }
+    }
+  } else {
+    for (Integer id : ids) {
+      Figure f = figures.get(id);
+      if (f != null) f.displayLive();
     }
   }
 
   fill(150);
-  text("press C: toggle clone mode | people: " + figures.size(), 10, 20);
+  text("press C: toggle clone mode | people: " + ids.size(), 10, 20);
 }
 
 void keyPressed() {
@@ -94,17 +110,34 @@ class Figure {
     line(pa.x, pa.y, pb.x, pb.y);
   }
 
-  // Draws scaled around the screen center, shifted by dx
-  void display(float dx, float scl, color col) {
-    pushMatrix();
-    translate(width / 2 + dx, height / 2);
-    scale(scl);
-    translate(-width / 2, -height / 2);
-
-    stroke(col);
-    strokeWeight(4 / scl);
+  // Draws the figure where the person actually is on screen
+  void displayLive() {
+    stroke(c);
+    strokeWeight(4);
     noFill();
+    drawBody();
+  }
 
+  // Draws the figure centered on its hips at (sx, sy), normalized by torso length
+  void displayClone(float sx, float sy, float scl, color col) {
+    PVector neck = PVector.lerp(p(11), p(12), 0.5);
+    PVector hip = PVector.lerp(p(23), p(24), 0.5);
+    float torso = PVector.dist(neck, hip);
+    if (torso < 10) return;
+    float k = scl * 140 / torso;
+
+    pushMatrix();
+    translate(sx, sy);
+    scale(k);
+    translate(-hip.x, -hip.y);
+    stroke(col);
+    strokeWeight(4 / k);
+    noFill();
+    drawBody();
+    popMatrix();
+  }
+
+  void drawBody() {
     // Arms
     bone(11, 12); bone(11, 13); bone(13, 15); bone(12, 14); bone(14, 16);
     // Legs
@@ -116,9 +149,10 @@ class Figure {
     line(neck.x, neck.y, hip.x, hip.y);
 
     // Head sized relative to shoulder width
-    PVector nose = p(0);
-    float r = PVector.dist(p(11), p(12)) * 0.35;
-    ellipse(nose.x, nose.y, r * 2, r * 2);
-    popMatrix();
+    if (vis[0] > 0.5) {
+      PVector nose = p(0);
+      float r = PVector.dist(p(11), p(12)) * 0.35;
+      ellipse(nose.x, nose.y, r * 2, r * 2);
+    }
   }
 }

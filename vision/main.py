@@ -19,6 +19,9 @@ options = vision.PoseLandmarkerOptions(
     base_options=mp_python.BaseOptions(model_asset_path=model_path),
     running_mode=vision.RunningMode.VIDEO,
     num_poses=MAX_PEOPLE,
+    min_pose_detection_confidence=0.5,
+    min_pose_presence_confidence=0.5,
+    min_tracking_confidence=0.5,
 )
 landmarker = vision.PoseLandmarker.create_from_options(options)
 
@@ -30,6 +33,11 @@ def centroid(lms):
     # Average of shoulders and hips
     pts = [lms[11], lms[12], lms[23], lms[24]]
     return (sum(p.x for p in pts) / 4, sum(p.y for p in pts) / 4)
+
+
+def torso_visible(lms):
+    # Shoulders and hips must be clearly visible, otherwise skip this person
+    return min(lms[i].visibility for i in (11, 12, 23, 24)) > 0.3
 
 
 def assign_ids(centers):
