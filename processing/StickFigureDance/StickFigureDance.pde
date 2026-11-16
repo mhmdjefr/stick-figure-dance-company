@@ -8,8 +8,12 @@ OscP5 osc;
 ConcurrentHashMap<Integer, Figure> figures = new ConcurrentHashMap<Integer, Figure>();
 color[] palette;
 boolean cloneMode = false;
-float[] cloneScale = {0.9, 1.1, 1.0};
+boolean delayOn = true;
 final float VIS_MIN = 0.5; // min landmark visibility to draw a body part
+
+final int NUM_SLOTS = 12;      // total clones on the floor
+float[] slotX = new float[NUM_SLOTS];
+float[] slotZ = new float[NUM_SLOTS];
 
 float floorY; // y of the dance floor in world space
 final float FLOOR_HALF_W = 450;
@@ -18,7 +22,7 @@ final float FLOOR_HALF_D = 300;
 SoundFile song;
 Amplitude amp;
 boolean hasMusic = false;
-float level = 0; // smoothed music volume
+float level = 0;   // smoothed music volume
 float peak = 0.01; // slowly decaying peak, used to normalize the volume
 
 void setup() {
@@ -26,6 +30,15 @@ void setup() {
   floorY = height * 0.75;
   osc = new OscP5(this, 12000);
   palette = new color[] { color(230, 60, 60), color(40, 120, 230), color(40, 170, 90), color(240, 160, 20) };
+
+  // Fixed dance floor slots: 4 columns x 3 rows with some random jitter
+  Random r = new Random(42);
+  for (int i = 0; i < NUM_SLOTS; i++) {
+    int col = i % 4;
+    int row = i / 4;
+    slotX[i] = width / 2.0 + (col - 1.5) * 220 + (r.nextFloat() - 0.5) * 90;
+    slotZ[i] = (row - 1) * 200 + (r.nextFloat() - 0.5) * 80;
+  }
 
   // Load music only if the file exists, so the sketch still runs without it
   if (new File(dataPath("music.mp3")).exists()) {
@@ -62,17 +75,16 @@ void draw() {
     camera(width / 2.0, floorY - 450, 900, width / 2.0, floorY, 0, 0, 1, 0);
     drawFloor();
 
-    int total = ids.size() * cloneScale.length;
-    int k = 0;
-    for (Integer id : ids) {
-      Figure f = figures.get(id);
+    // Slots are shared round-robin between people, so the total stays at NUM_SLOTS
+    int n = ids.size();
+    for (int j = 0; j < n; j++) {
+      Figure f = figures.get(ids.get(j));
       if (f == null) continue;
-      for (int i = 0; i < cloneScale.length; i++) {
-        float wx = width / 2.0 - 350 + 700 * (k + 1) / (total + 1.0);
-        float wz = ((k % 3) - 1) * 120; // front, middle, back rows
-        color col = lerpColor(f.c, palette[(f.id + i + 1) % palette.length], 0.6);
-        f.displayClone(wx, wz, cloneScale[i], col);
-        k++;
+      int i = 0;
+      for (int s = j; s < NUM_SLOTS; s += n) {
+        int delay = delayOn ? f.cloneDelay[i] : 0;
+        f.displayClone(slotX[s], slotZ[s], f.cloneScale[i], f.cloneCol[i], delay);
+        i++;
       }
     }
   } else {
@@ -106,7 +118,7 @@ void drawHud(int people) {
   fill(150);
   noStroke();
   textAlign(LEFT, BASELINE);
-  text("C: clone mode | SPACE: play/pause music | people: " + people, 10, 20);
+  text("C: clone mode | D: clone delay (" + (delayOn ? "on" : "off") + ") | SPACE: play/pause music | people: " + people, 10, 20);
 
   if (hasMusic) {
     // Volume meter (debug), normalized to the recent peak
@@ -125,6 +137,7 @@ void drawHud(int people) {
 
 void keyPressed() {
   if (key == 'c' || key == 'C') cloneMode = !cloneMode;
+  if (key == 'd' || key == 'D') delayOn = !delayOn;
   if (key == ' ' && hasMusic) {
     if (song.isPlaying()) song.pause();
     else song.loop();
@@ -143,50 +156,88 @@ void oscEvent(OscMessage msg) {
   f.update(msg);
 }
 
+// One snapshot of all 33 landmarks (never modified after it is created)
+class Pose {
+  float[] x = new float[33];
+  float[] y = new float[33];
+  float[] v = new float[33];
+  int t; // timestamp in ms
+}
+
 class Figure {
   int id;
   color c;
   int lastSeen;
   boolean fresh = true;
-  float[] lx = new float[33];
-  float[] ly = new float[33];
-  float[] vis = new float[33];
+  Pose cur = new Pose();
+
+  // Ring buffer of recent poses, used to replay delayed movement on clones
+  final int HIST = 120;
+  Pose[] hist = new Pose[HIST];
+  int head = 0; // next write index
+
+  // Per-clone look: random size, color and delay
+  float[] cloneScale = new float[NUM_SLOTS];
+  color[] cloneCol = new color[NUM_SLOTS];
+  int[] cloneDelay = new int[NUM_SLOTS];
 
   Figure(int id, color c) {
     this.id = id;
     this.c = c;
+    Random r = new Random(id * 7919L + 13);
+    for (int i = 0; i < NUM_SLOTS; i++) {
+      cloneScale[i] = 0.8 + r.nextFloat() * 0.5;
+      cloneCol[i] = color(60 + r.nextInt(196), 60 + r.nextInt(196), 60 + r.nextInt(196));
+      cloneDelay[i] = (i == 0) ? 0 : r.nextInt(1200);
+    }
   }
 
   void update(OscMessage msg) {
+    Pose np = new Pose();
     for (int i = 0; i < 33; i++) {
       float nx = msg.get(1 + i * 4).floatValue();
       float ny = msg.get(1 + i * 4 + 1).floatValue();
       // Light smoothing to reduce jitter; snap on the first frame
-      lx[i] = fresh ? nx : lerp(lx[i], nx, 0.5);
-      ly[i] = fresh ? ny : lerp(ly[i], ny, 0.5);
-      vis[i] = msg.get(1 + i * 4 + 3).floatValue();
+      np.x[i] = fresh ? nx : lerp(cur.x[i], nx, 0.5);
+      np.y[i] = fresh ? ny : lerp(cur.y[i], ny, 0.5);
+      np.v[i] = msg.get(1 + i * 4 + 3).floatValue();
     }
+    np.t = millis();
+    cur = np;
+    hist[head] = np;
+    head = (head + 1) % HIST;
     fresh = false;
     lastSeen = millis();
   }
 
+  // Newest pose that is at least delayMs old (or the oldest one we have)
+  Pose poseAt(int delayMs) {
+    if (delayMs <= 0) return cur;
+    int target = millis() - delayMs;
+    int h = head;
+    Pose oldest = cur;
+    for (int k = 1; k <= HIST; k++) {
+      Pose p = hist[((h - k) % HIST + HIST) % HIST];
+      if (p == null) break;
+      oldest = p;
+      if (p.t <= target) return p;
+    }
+    return oldest;
+  }
+
   // A person counts only if both shoulders are visible
   boolean valid() {
-    return vis[11] > VIS_MIN && vis[12] > VIS_MIN;
+    return cur.v[11] > VIS_MIN && cur.v[12] > VIS_MIN;
   }
 
-  boolean hipsVisible() {
-    return vis[23] > VIS_MIN && vis[24] > VIS_MIN;
+  PVector pt(Pose p, int i) {
+    return new PVector(map(p.x[i], 0, 1, 0, width), map(p.y[i], 0, 1, 0, height));
   }
 
-  PVector p(int i) {
-    return new PVector(map(lx[i], 0, 1, 0, width), map(ly[i], 0, 1, 0, height));
-  }
-
-  void bone(int a, int b) {
-    if (vis[a] < VIS_MIN || vis[b] < VIS_MIN) return; // skip low-confidence joints
-    PVector pa = p(a);
-    PVector pb = p(b);
+  void bone(Pose p, int a, int b) {
+    if (p.v[a] < VIS_MIN || p.v[b] < VIS_MIN) return; // skip low-confidence joints
+    PVector pa = pt(p, a);
+    PVector pb = pt(p, b);
     line(pa.x, pa.y, pb.x, pb.y);
   }
 
@@ -195,13 +246,15 @@ class Figure {
     stroke(c);
     strokeWeight(4);
     fill(c);
-    drawBody();
+    drawBody(cur);
   }
 
-  // Stands the figure on the floor at world (wx, floorY, wz), sized by shoulder width
-  void displayClone(float wx, float wz, float scl, color col) {
-    PVector neck = PVector.lerp(p(11), p(12), 0.5);
-    float shoulderW = PVector.dist(p(11), p(12));
+  // Stands a (possibly delayed) copy on the floor at world (wx, floorY, wz)
+  void displayClone(float wx, float wz, float scl, color col, int delayMs) {
+    Pose p = poseAt(delayMs);
+    if (p.v[11] < VIS_MIN || p.v[12] < VIS_MIN) return;
+    PVector neck = PVector.lerp(pt(p, 11), pt(p, 12), 0.5);
+    float shoulderW = PVector.dist(pt(p, 11), pt(p, 12));
     if (shoulderW < 10) return;
     float k = scl * 60 / shoulderW;
 
@@ -213,29 +266,29 @@ class Figure {
     stroke(col);
     strokeWeight(4 / k);
     fill(col);
-    drawBody();
+    drawBody(p);
     popMatrix();
   }
 
-  void drawBody() {
+  void drawBody(Pose p) {
     // Arms (each bone is skipped if either end is not visible)
-    bone(11, 12); bone(11, 13); bone(13, 15); bone(12, 14); bone(14, 16);
+    bone(p, 11, 12); bone(p, 11, 13); bone(p, 13, 15); bone(p, 12, 14); bone(p, 14, 16);
 
     // Torso and legs only when both hips are visible
-    if (hipsVisible()) {
-      bone(23, 24); bone(23, 25); bone(25, 27); bone(24, 26); bone(26, 28);
+    if (p.v[23] > VIS_MIN && p.v[24] > VIS_MIN) {
+      bone(p, 23, 24); bone(p, 23, 25); bone(p, 25, 27); bone(p, 24, 26); bone(p, 26, 28);
       // MediaPipe has no neck/torso landmark, so compute them
-      PVector neck = PVector.lerp(p(11), p(12), 0.5);
-      PVector hip = PVector.lerp(p(23), p(24), 0.5);
+      PVector neck = PVector.lerp(pt(p, 11), pt(p, 12), 0.5);
+      PVector hip = PVector.lerp(pt(p, 23), pt(p, 24), 0.5);
       line(neck.x, neck.y, hip.x, hip.y);
     }
 
-    // Head sized relative to shoulder width
-    if (vis[0] > VIS_MIN) {
-      PVector nose = p(0);
-      PVector shoulderMid = PVector.lerp(p(11), p(12), 0.5);
+    // Head sized relative to shoulder width, joined to the shoulders by a neck line
+    if (p.v[0] > VIS_MIN) {
+      PVector nose = pt(p, 0);
+      PVector shoulderMid = PVector.lerp(pt(p, 11), pt(p, 12), 0.5);
       line(shoulderMid.x, shoulderMid.y, nose.x, nose.y);
-      float r = PVector.dist(p(11), p(12)) * 0.35;
+      float r = PVector.dist(pt(p, 11), pt(p, 12)) * 0.35;
       ellipse(nose.x, nose.y, r * 2, r * 2);
     }
   }
