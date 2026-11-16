@@ -211,7 +211,7 @@ class Figure {
     scale(k);
     translate(-neck.x, -neck.y);
     stroke(col);
-    strokeWeight(3);
+    strokeWeight(4 / k);
     fill(col);
     drawBody();
     popMatrix();
@@ -233,6 +233,8 @@ class Figure {
     // Head sized relative to shoulder width
     if (vis[0] > VIS_MIN) {
       PVector nose = p(0);
+      PVector shoulderMid = PVector.lerp(p(11), p(12), 0.5);
+      line(shoulderMid.x, shoulderMid.y, nose.x, nose.y);
       float r = PVector.dist(p(11), p(12)) * 0.35;
       ellipse(nose.x, nose.y, r * 2, r * 2);
     }
