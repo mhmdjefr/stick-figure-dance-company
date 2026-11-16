@@ -8,16 +8,22 @@ OscP5 osc;
 ConcurrentHashMap<Integer, Figure> figures = new ConcurrentHashMap<Integer, Figure>();
 color[] palette;
 boolean cloneMode = false;
-float[] cloneScale = {0.5, 0.65, 0.45};
+float[] cloneScale = {0.9, 1.1, 1.0};
 final float VIS_MIN = 0.5; // min landmark visibility to draw a body part
+
+float floorY; // y of the dance floor in world space
+final float FLOOR_HALF_W = 450;
+final float FLOOR_HALF_D = 300;
 
 SoundFile song;
 Amplitude amp;
 boolean hasMusic = false;
-float level = 0; // smoothed music volume, roughly 0..1
+float level = 0; // smoothed music volume
+float peak = 0.01; // slowly decaying peak, used to normalize the volume
 
 void setup() {
-  size(960, 720); // 4:3, same aspect ratio as a 640x480 webcam
+  size(960, 720, P3D); // 4:3, same aspect ratio as a 640x480 webcam
+  floorY = height * 0.75;
   osc = new OscP5(this, 12000);
   palette = new color[] { color(230, 60, 60), color(40, 120, 230), color(40, 170, 90), color(240, 160, 20) };
 
@@ -35,6 +41,7 @@ void draw() {
 
   if (hasMusic) {
     level = lerp(level, amp.analyze(), 0.2);
+    peak = max(max(peak * 0.998, level), 0.01);
   }
 
   // Drop stale figures; keep only people whose shoulders are visible
@@ -51,27 +58,48 @@ void draw() {
   Collections.sort(ids);
 
   if (cloneMode) {
-    // Dance floor: clones sit in fixed slots spread across the screen
+    // 3D scene: camera looks down at the floor from the front
+    camera(width / 2.0, floorY - 450, 900, width / 2.0, floorY, 0, 0, 1, 0);
+    drawFloor();
+
     int total = ids.size() * cloneScale.length;
     int k = 0;
     for (Integer id : ids) {
       Figure f = figures.get(id);
       if (f == null) continue;
       for (int i = 0; i < cloneScale.length; i++) {
-        float sx = width * (k + 1) / (total + 1.0);
+        float wx = width / 2.0 - 350 + 700 * (k + 1) / (total + 1.0);
+        float wz = ((k % 3) - 1) * 120; // front, middle, back rows
         color col = lerpColor(f.c, palette[(f.id + i + 1) % palette.length], 0.6);
-        f.displayClone(sx, height * 0.35, cloneScale[i], col);
+        f.displayClone(wx, wz, cloneScale[i], col);
         k++;
       }
     }
   } else {
+    // Default camera maps the z=0 plane to pixel coordinates (2D-like view)
+    camera();
     for (Integer id : ids) {
       Figure f = figures.get(id);
       if (f != null) f.displayLive();
     }
   }
 
+  // HUD on top, in screen space
+  camera();
+  hint(DISABLE_DEPTH_TEST);
   drawHud(ids.size());
+  hint(ENABLE_DEPTH_TEST);
+}
+
+void drawFloor() {
+  noStroke();
+  fill(128);
+  beginShape(QUADS);
+  vertex(width / 2.0 - FLOOR_HALF_W, floorY, -FLOOR_HALF_D);
+  vertex(width / 2.0 + FLOOR_HALF_W, floorY, -FLOOR_HALF_D);
+  vertex(width / 2.0 + FLOOR_HALF_W, floorY, FLOOR_HALF_D);
+  vertex(width / 2.0 - FLOOR_HALF_W, floorY, FLOOR_HALF_D);
+  endShape();
 }
 
 void drawHud(int people) {
@@ -81,8 +109,8 @@ void drawHud(int people) {
   text("C: clone mode | SPACE: play/pause music | people: " + people, 10, 20);
 
   if (hasMusic) {
-    // Volume meter (debug), amplitude values are small so scale them up
-    float w = constrain(level * 4, 0, 1) * (width - 20);
+    // Volume meter (debug), normalized to the recent peak
+    float w = constrain(level / peak, 0, 1) * (width - 20);
     fill(220);
     rect(10, height - 24, width - 20, 10);
     fill(40, 120, 230);
@@ -166,24 +194,25 @@ class Figure {
   void displayLive() {
     stroke(c);
     strokeWeight(4);
-    noFill();
+    fill(c);
     drawBody();
   }
 
-  // Draws the figure with its neck at (sx, sy), scaled by shoulder width
-  void displayClone(float sx, float sy, float scl, color col) {
+  // Stands the figure on the floor at world (wx, floorY, wz), sized by shoulder width
+  void displayClone(float wx, float wz, float scl, color col) {
     PVector neck = PVector.lerp(p(11), p(12), 0.5);
     float shoulderW = PVector.dist(p(11), p(12));
     if (shoulderW < 10) return;
-    float k = scl * 110 / shoulderW;
+    float k = scl * 60 / shoulderW;
 
     pushMatrix();
-    translate(sx, sy);
+    // The neck sits about 210 units above the floor, so a full body reaches the floor
+    translate(wx, floorY - 210 * scl, wz);
     scale(k);
     translate(-neck.x, -neck.y);
     stroke(col);
-    strokeWeight(4 / k);
-    noFill();
+    strokeWeight(3);
+    fill(col);
     drawBody();
     popMatrix();
   }
