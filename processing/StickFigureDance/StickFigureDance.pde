@@ -186,7 +186,7 @@ class Figure {
     this.c = c;
     Random r = new Random(id * 7919L + 13);
     for (int i = 0; i < NUM_SLOTS; i++) {
-      cloneScale[i] = 0.8 + r.nextFloat() * 0.5;
+      cloneScale[i] = 0.8 + r.nextFloat() * 0.3;
       cloneCol[i] = color(60 + r.nextInt(196), 60 + r.nextInt(196), 60 + r.nextInt(196));
       cloneDelay[i] = (i == 0) ? 0 : r.nextInt(1200);
     }
