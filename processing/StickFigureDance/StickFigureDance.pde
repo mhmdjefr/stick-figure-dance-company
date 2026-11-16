@@ -28,7 +28,11 @@ float peak = 0.01; // slowly decaying peak, used to normalize the volume
 void setup() {
   size(960, 720, P3D); // 4:3, same aspect ratio as a 640x480 webcam
   floorY = height * 0.75;
-  osc = new OscP5(this, 12000);
+  // Larger datagram buffer so camera frames (JPEG blobs) fit in one message
+  OscProperties props = new OscProperties();
+  props.setListeningPort(12000);
+  props.setDatagramSize(10000);
+  osc = new OscP5(this, props);
   palette = new color[] { color(230, 60, 60), color(40, 120, 230), color(40, 170, 90), color(240, 160, 20) };
 
   // Fixed dance floor slots: 4 columns x 3 rows with some random jitter
@@ -100,6 +104,7 @@ void draw() {
   camera();
   hint(DISABLE_DEPTH_TEST);
   drawHud(ids.size());
+  drawPreview();
   hint(ENABLE_DEPTH_TEST);
 }
 
@@ -145,6 +150,10 @@ void keyPressed() {
 }
 
 void oscEvent(OscMessage msg) {
+  if (msg.checkAddrPattern("/frame")) {
+    receiveFrame(msg);
+    return;
+  }
   if (!msg.checkAddrPattern("/pose")) return;
   if (msg.arguments().length < 1 + 33 * 4) return;
   int id = msg.get(0).intValue();
