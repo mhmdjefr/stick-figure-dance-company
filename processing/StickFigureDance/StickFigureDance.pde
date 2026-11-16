@@ -1,4 +1,5 @@
 import oscP5.*;
+import processing.sound.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.*;
 
@@ -10,14 +11,31 @@ boolean cloneMode = false;
 float[] cloneScale = {0.5, 0.65, 0.45};
 final float VIS_MIN = 0.5; // min landmark visibility to draw a body part
 
+SoundFile song;
+Amplitude amp;
+boolean hasMusic = false;
+float level = 0; // smoothed music volume, roughly 0..1
+
 void setup() {
   size(960, 720); // 4:3, same aspect ratio as a 640x480 webcam
   osc = new OscP5(this, 12000);
   palette = new color[] { color(230, 60, 60), color(40, 120, 230), color(40, 170, 90), color(240, 160, 20) };
+
+  // Load music only if the file exists, so the sketch still runs without it
+  if (new File(dataPath("music.mp3")).exists()) {
+    song = new SoundFile(this, "music.mp3");
+    amp = new Amplitude(this);
+    amp.input(song);
+    hasMusic = true;
+  }
 }
 
 void draw() {
   background(255);
+
+  if (hasMusic) {
+    level = lerp(level, amp.analyze(), 0.2);
+  }
 
   // Drop stale figures; keep only people whose shoulders are visible
   ArrayList<Integer> ids = new ArrayList<Integer>();
@@ -53,12 +71,36 @@ void draw() {
     }
   }
 
+  drawHud(ids.size());
+}
+
+void drawHud(int people) {
   fill(150);
-  text("press C: toggle clone mode | people: " + ids.size(), 10, 20);
+  noStroke();
+  textAlign(LEFT, BASELINE);
+  text("C: clone mode | SPACE: play/pause music | people: " + people, 10, 20);
+
+  if (hasMusic) {
+    // Volume meter (debug), amplitude values are small so scale them up
+    float w = constrain(level * 4, 0, 1) * (width - 20);
+    fill(220);
+    rect(10, height - 24, width - 20, 10);
+    fill(40, 120, 230);
+    rect(10, height - 24, w, 10);
+    fill(150);
+    text(song.isPlaying() ? "music: playing" : "music: paused", 10, height - 32);
+  } else {
+    fill(200, 60, 60);
+    text("music.mp3 not found in data/ folder", 10, height - 12);
+  }
 }
 
 void keyPressed() {
   if (key == 'c' || key == 'C') cloneMode = !cloneMode;
+  if (key == ' ' && hasMusic) {
+    if (song.isPlaying()) song.pause();
+    else song.loop();
+  }
 }
 
 void oscEvent(OscMessage msg) {
