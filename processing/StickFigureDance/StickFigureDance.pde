@@ -105,6 +105,7 @@ void draw() {
   hint(DISABLE_DEPTH_TEST);
   drawHud(ids.size());
   drawPreview();
+  handleScreenshot();
   hint(ENABLE_DEPTH_TEST);
 }
 
@@ -123,7 +124,7 @@ void drawHud(int people) {
   fill(150);
   noStroke();
   textAlign(LEFT, BASELINE);
-  text("C: clone mode | D: clone delay (" + (delayOn ? "on" : "off") + ") | SPACE: play/pause music | people: " + people, 10, 20);
+  text("C: clone mode | S: screenshot | D: clone delay (" + (delayOn ? "on" : "off") + ") | SPACE: play/pause music | people: " + people, 10, 20);
 
   if (hasMusic) {
     // Volume meter (debug), normalized to the recent peak
