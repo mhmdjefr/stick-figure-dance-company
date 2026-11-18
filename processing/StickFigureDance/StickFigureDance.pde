@@ -77,7 +77,7 @@ void draw() {
   if (cloneMode) {
     // 3D scene: camera looks down at the floor from the front
     camera(width / 2.0, floorY - 450, 900, width / 2.0, floorY, 0, 0, 1, 0);
-    drawFloor();
+    drawDanceFloor();
 
     // Slots are shared round-robin between people, so the total stays at NUM_SLOTS
     int n = ids.size();
